@@ -14,3 +14,8 @@ __pycache__/
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Banco de dados
+*.db
+*.sqlite
+*.sqlite3

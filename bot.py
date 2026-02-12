@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 import random
 import json
 from datetime import datetime
+from database import db
+import aiosqlite
 
 # Carregar token secreto
 load_dotenv()
@@ -31,7 +33,15 @@ bot = MestreRPGBot()
 async def on_ready():
     print(f'🎲 {bot.user} está online e pronto para mestrar!')
     print(f'📚 Estou em {len(bot.guilds)} servidores!')
-    await bot.change_presence(activity=discord.Game(name="!ajuda | Mestre de RPG"))
+
+    # Inicializar banco de dados
+    try:
+        await db.init_db()
+        print("💾 Banco de dados carregado com sucesso!")
+    except Exception as e:
+        print(f"❌ Erro ao carregar banco de dados: {e}")
+
+    await bot.change_presence(activity=discord.Game(name="/ajuda | Mestre de RPG"))
 
 @bot.tree.command(name="rolar", description="Role dados! Ex: /rolar 2d20+5")
 async def rolar(interaction: discord.Interaction, dados: str):
