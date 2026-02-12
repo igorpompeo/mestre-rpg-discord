@@ -333,6 +333,164 @@ async def ver_ficha(interaction: discord.Interaction, id: int):
         print(f"❌ Erro ao ver ficha: {e}")
         await interaction.followup.send("❌ Erro ao buscar ficha. Verifique o ID e tente novamente.")
 
+@bot.tree.command(name="iniciativa", description="Role iniciativa para combate")
+async def iniciativa(interaction: discord.Interaction, modificador: int = 0):
+    """Rola 1d20 + modificador para iniciativa"""
+    rolagem = random.randint(1, 20)
+    total = rolagem + modificador
+
+    embed = discord.Embed(
+        title="⚔️ Iniciativa!",
+        description=f"{interaction.user.mention} age com **{total}**",
+        color=discord.Color.orange()
+    )
+    embed.add_field(name="🎲 Rolagem", value=f"1d20: {rolagem}", inline=True)
+    embed.add_field(name="➕ Mod", value=modificador, inline=True)
+    embed.add_field(name="🏁 Total", value=f"**{total}**", inline=True)
+
+    # Mensagem dramática baseada no resultado
+    if total >= 20:
+        embed.set_footer(text="⚡ Você age antes que todos percebam o movimento!")
+    elif total <= 5:
+        embed.set_footer(text="😴 Você estava distraído... age por último.")
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="atacar", description="Role um ataque contra um alvo")
+async def atacar(interaction: discord.Interaction,
+                 alvo: str,
+                 modificador_forca: int = 0,
+                 modificador_proficiencia: int = 2):
+
+    # Rolagem de ataque
+    ataque = random.randint(1, 20)
+    bonus_ataque = modificador_forca + modificador_proficiencia
+    total_ataque = ataque + bonus_ataque
+
+    # Rolar dano (1d8 para arma simples)
+    dano = random.randint(1, 8)
+    total_dano = dano + modificador_forca
+
+    embed = discord.Embed(
+        title="⚔️ Ataque!",
+        description=f"{interaction.user.mention} ataca **{alvo}**!",
+        color=discord.Color.red()
+    )
+
+    # Resultado do ataque
+    if ataque == 20:
+        resultado = "🎯 **CRÍTICO!**"
+        total_dano *= 2  # Dano dobrado no crítico
+        cor = discord.Color.gold()
+    elif total_ataque >= 15:  # CA média
+        resultado = "✅ **Acertou!**"
+        cor = discord.Color.green()
+    else:
+        resultado = "❌ **Errou!**"
+        cor = discord.Color.dark_gray()
+
+    embed.color = cor
+    embed.add_field(name="🎲 Ataque", value=f"1d20: {ataque} + {bonus_ataque} = **{total_ataque}**", inline=False)
+    embed.add_field(name="💥 Dano", value=f"1d8: {dano} + {modificador_forca} = **{total_dano}**", inline=False)
+    embed.add_field(name="📊 Resultado", value=resultado, inline=False)
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="dano", description="Aplique dano a um personagem")
+async def causar_dano(interaction: discord.Interaction,
+                      ficha_id: int,
+                      dano: int,
+                      tipo: str = "perfurante"):
+
+    # Buscar ficha
+    fichas = await db.buscar_fichas(
+        str(interaction.user.id),
+        str(interaction.guild_id),
+        ficha_id
+    )
+
+    if not fichas:
+        await interaction.response.send_message(f"❌ Ficha com ID `{ficha_id}` não encontrada!")
+        return
+
+    ficha = fichas[0]
+    pv_atual = ficha['pv_atual']
+    pv_max = ficha['pv_max']
+
+    # Aplicar dano
+    novo_pv = max(0, pv_atual - dano)
+
+    # Atualizar no banco
+    await db.atualizar_ficha(ficha_id, {'pv_atual': novo_pv})
+
+    # Calcular porcentagem de vida
+    porcentagem = (novo_pv / pv_max) * 100
+
+    # Criar barra de vida visual
+    barras = 10
+    vida_barras = int((novo_pv / pv_max) * barras)
+    barra_vida = "🟩" * vida_barras + "⬜" * (barras - vida_barras)
+
+    embed = discord.Embed(
+        title="💥 Dano Recebido!",
+        description=f"**{ficha['nome_personagem']}** sofreu {dano} de dano {tipo}!",
+        color=discord.Color.red()
+    )
+
+    embed.add_field(name="❤️ Vida",
+                   value=f"{novo_pv}/{pv_max} PV\n{barra_vida} {porcentagem:.0f}%",
+                   inline=False)
+
+    if novo_pv == 0:
+        embed.add_field(name="💀 Status", value="**Inconsciente!**", inline=False)
+    elif novo_pv <= pv_max * 0.25:
+        embed.add_field(name="⚠️ Alerta", value="**Ferido gravemente!**", inline=False)
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="curar", description="Cure um personagem")
+async def curar(interaction: discord.Interaction,
+                ficha_id: int,
+                cura: int):
+
+    # Buscar ficha
+    fichas = await db.buscar_fichas(
+        str(interaction.user.id),
+        str(interaction.guild_id),
+        ficha_id
+    )
+
+    if not fichas:
+        await interaction.response.send_message(f"❌ Ficha com ID `{ficha_id}` não encontrada!")
+        return
+
+    ficha = fichas[0]
+    pv_atual = ficha['pv_atual']
+    pv_max = ficha['pv_max']
+
+    # Aplicar cura (não ultrapassar o máximo)
+    novo_pv = min(pv_max, pv_atual + cura)
+
+    # Atualizar no banco
+    await db.atualizar_ficha(ficha_id, {'pv_atual': novo_pv})
+
+    porcentagem = (novo_pv / pv_max) * 100
+    barras = 10
+    vida_barras = int((novo_pv / pv_max) * barras)
+    barra_vida = "🟩" * vida_barras + "⬜" * (barras - vida_barras)
+
+    embed = discord.Embed(
+        title="✨ Cura Recebida!",
+        description=f"**{ficha['nome_personagem']}** recuperou {cura} pontos de vida!",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(name="❤️ Vida",
+                   value=f"{novo_pv}/{pv_max} PV\n{barra_vida} {porcentagem:.0f}%",
+                   inline=False)
+
+    await interaction.response.send_message(embed=embed)
+
 @bot.tree.command(name="narrar", description="Peça para o mestre narrar uma ação")
 async def narrar(interaction: discord.Interaction, acao: str):
     respostas = [
