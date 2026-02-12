@@ -128,21 +128,210 @@ async def criar_sessao(interaction: discord.Interaction, sistema: str = "D&D 5e"
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="ficha", description="Crie seu personagem")
-async def ficha(interaction: discord.Interaction, nome: str, classe: str, nivel: int = 1):
-    embed = discord.Embed(
-        title="📋 Ficha do Personagem",
-        description=f"**{nome}**",
-        color=discord.Color.purple()
-    )
-    embed.add_field(name="Classe", value=classe, inline=True)
-    embed.add_field(name="Nível", value=nivel, inline=True)
-    embed.add_field(name="Jogador", value=interaction.user.mention, inline=True)
-    embed.add_field(name="PV", value="10 + modificador", inline=True)
-    embed.add_field(name="CA", value="10 + armadura", inline=True)
-    embed.set_thumbnail(url=interaction.user.avatar.url if interaction.user.avatar else None)
+@bot.tree.command(name="ficha", description="Crie seu personagem (salvo permanentemente!)")
+async def ficha(interaction: discord.Interaction,
+                nome: str,
+                classe: str,
+                nivel: int = 1,
+                raca: str = "Humano",
+                forca: int = 10,
+                destreza: int = 10,
+                constituicao: int = 10,
+                inteligencia: int = 10,
+                sabedoria: int = 10,
+                carisma: int = 10):
 
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.defer()
+
+    try:
+        # Preparar dados da ficha
+        dados_ficha = {
+            'nome': nome,
+            'classe': classe,
+            'nivel': nivel,
+            'raca': raca,
+            'forca': forca,
+            'destreza': destreza,
+            'constituicao': constituicao,
+            'inteligencia': inteligencia,
+            'sabedoria': sabedoria,
+            'carisma': carisma,
+        }
+
+        # Salvar no banco
+        ficha_id = await db.criar_ficha(
+            str(interaction.user.id),
+            str(interaction.guild_id),
+            dados_ficha
+        )
+
+        if ficha_id:
+            # Calcular modificadores
+            mod_for = (forca - 10) // 2
+            mod_des = (destreza - 10) // 2
+            mod_con = (constituicao - 10) // 2
+
+            # PV base (D&D 5e simplificado)
+            pv_max = 10 + mod_con + (nivel - 1) * 6
+
+            # Criar embed bonito
+            embed = discord.Embed(
+                title="📋 Ficha Salva com Sucesso!",
+                description=f"**{nome}** - {raca} {classe} Nvl.{nivel}",
+                color=discord.Color.green()
+            )
+
+            # Atributos
+            atributos = f"💪 For:{forca} ({mod_for:+d})  🏹 Des:{destreza} ({mod_des:+d})  ❤️ Con:{constituicao} ({mod_con:+d})"
+            embed.add_field(name="Atributos Físicos", value=atributos, inline=False)
+
+            atributos2 = f"📘 Int:{inteligencia}  🧠 Sab:{sabedoria}  💬 Car:{carisma}"
+            embed.add_field(name="Atributos Mentais", value=atributos2, inline=False)
+
+            # Combate
+            embed.add_field(name="❤️ PV Máximo", value=pv_max, inline=True)
+            embed.add_field(name="🛡️ CA", value="10 + " + str(mod_des), inline=True)
+            embed.add_field(name="🎲 ID", value=f"`{ficha_id}`", inline=True)
+
+            embed.set_footer(text="✅ Salvo no banco de dados! Use /ficha_ver para consultar")
+            embed.set_thumbnail(url=interaction.user.avatar.url if interaction.user.avatar else None)
+
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.followup.send("❌ Erro ao criar ficha. Tente novamente.")
+
+    except Exception as e:
+        print(f"❌ Erro no comando ficha: {e}")
+        await interaction.followup.send("❌ Erro ao criar ficha. Verifique os dados e tente novamente.")
+
+@bot.tree.command(name="fichas", description="Lista todas as suas fichas de personagem")
+async def listar_fichas(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    try:
+        # Buscar fichas do jogador
+        fichas = await db.buscar_fichas(
+            str(interaction.user.id),
+            str(interaction.guild_id)
+        )
+
+        if not fichas:
+            embed = discord.Embed(
+                title="📭 Nenhuma Ficha Encontrada",
+                description="Você ainda não tem personagens! Crie um com `/ficha`",
+                color=discord.Color.orange()
+            )
+            await interaction.followup.send(embed=embed)
+            return
+
+        embed = discord.Embed(
+            title=f"📚 Suas Fichas de Personagem ({len(fichas)})",
+            color=discord.Color.blue()
+        )
+
+        for ficha in fichas[:5]:  # Mostrar até 5 fichas
+            nome = ficha['nome_personagem']
+            classe = ficha['classe']
+            nivel = ficha['nivel']
+            raca = ficha['raca']
+            pv = ficha['pv_atual']
+            pv_max = ficha['pv_max']
+
+            # Barra de vida visual
+            vida_porcentagem = (pv / pv_max) * 10
+            barra_vida = "🟩" * int(vida_porcentagem) + "⬜" * (10 - int(vida_porcentagem))
+
+            embed.add_field(
+                name=f"**{nome}** (ID: `{ficha['id']}`)",
+                value=f"🎭 {raca} {classe} Nvl.{nivel}\n❤️ {pv}/{pv_max} PV {barra_vida}",
+                inline=False
+            )
+
+        if len(fichas) > 5:
+            embed.set_footer(text=f"E mais {len(fichas) - 5} personagens...")
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"❌ Erro ao listar fichas: {e}")
+        await interaction.followup.send("❌ Erro ao buscar fichas. Tente novamente.")
+
+@bot.tree.command(name="ficha_ver", description="Mostra os detalhes de uma ficha específica")
+async def ver_ficha(interaction: discord.Interaction, id: int):
+    await interaction.response.defer()
+
+    try:
+        fichas = await db.buscar_fichas(
+            str(interaction.user.id),
+            str(interaction.guild_id),
+            id
+        )
+
+        if not fichas:
+            await interaction.followup.send(f"❌ Ficha com ID `{id}` não encontrada!")
+            return
+
+        ficha = fichas[0]
+
+        # Calcular modificadores
+        mod_for = (ficha['forca'] - 10) // 2
+        mod_des = (ficha['destreza'] - 10) // 2
+        mod_con = (ficha['constituicao'] - 10) // 2
+        mod_int = (ficha['inteligencia'] - 10) // 2
+        mod_sab = (ficha['sabedoria'] - 10) // 2
+        mod_car = (ficha['carisma'] - 10) // 2
+
+        embed = discord.Embed(
+            title=f"📖 {ficha['nome_personagem']}",
+            description=f"{ficha['raca']} {ficha['classe']} • Nível {ficha['nivel']}",
+            color=discord.Color.purple()
+        )
+
+        # Atributos
+        embed.add_field(
+            name="💪 Força",
+            value=f"{ficha['forca']} ({mod_for:+d})",
+            inline=True
+        )
+        embed.add_field(
+            name="🏹 Destreza",
+            value=f"{ficha['destreza']} ({mod_des:+d})",
+            inline=True
+        )
+        embed.add_field(
+            name="❤️ Constituição",
+            value=f"{ficha['constituicao']} ({mod_con:+d})",
+            inline=True
+        )
+        embed.add_field(
+            name="📘 Inteligência",
+            value=f"{ficha['inteligencia']} ({mod_int:+d})",
+            inline=True
+        )
+        embed.add_field(
+            name="🧠 Sabedoria",
+            value=f"{ficha['sabedoria']} ({mod_sab:+d})",
+            inline=True
+        )
+        embed.add_field(
+            name="💬 Carisma",
+            value=f"{ficha['carisma']} ({mod_car:+d})",
+            inline=True
+        )
+
+        # Combate
+        ca_base = 10 + mod_des
+        embed.add_field(name="🛡️ Classe de Armadura", value=ca_base, inline=True)
+        embed.add_field(name="❤️ Pontos de Vida", value=f"{ficha['pv_atual']}/{ficha['pv_max']}", inline=True)
+        embed.add_field(name="⚔️ Bônus de Proficiência", value=f"+{2 + (ficha['nivel'] - 1) // 4}", inline=True)
+
+        embed.set_footer(text=f"ID: {ficha['id']} • Criado em {ficha['criado_em'][:10]}")
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"❌ Erro ao ver ficha: {e}")
+        await interaction.followup.send("❌ Erro ao buscar ficha. Verifique o ID e tente novamente.")
 
 @bot.tree.command(name="narrar", description="Peça para o mestre narrar uma ação")
 async def narrar(interaction: discord.Interaction, acao: str):
